@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {IFirewallGatedBridge} from "../src/IFirewallGatedBridge.sol";
+import {IFirewallGatedBridge, Signature, MultiAttestation} from "../src/IFirewallGatedBridge.sol";
 
 contract FirewallIntegrationTest is Test {
     IFirewallGatedBridge public bridge;
@@ -31,7 +31,7 @@ contract FirewallIntegrationTest is Test {
     }
 
     function test_EndToEnd_LegitimateRelease_MultiSigner() public {
-        bytes memory message = abi.encode("transfer(100 ETH)");
+        bytes memory message = abi.encode(makeAddr("alice"), 100 ether);
         bytes32 messageHash = keccak256(message);
         bytes32 sourceStateRoot = keccak256("state_root_19500000");
 
@@ -51,17 +51,17 @@ contract FirewallIntegrationTest is Test {
         (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(keyA, digest);
         (uint8 vB, bytes32 rB, bytes32 sB) = vm.sign(keyB, digest);
 
-        IFirewallGatedBridge.Signature[] memory sigs = new IFirewallGatedBridge.Signature[](2);
+        Signature[] memory sigs = new Signature[](2);
         if (guardianA < guardianB) {
-            sigs[0] = IFirewallGatedBridge.Signature(vA, rA, sA);
-            sigs[1] = IFirewallGatedBridge.Signature(vB, rB, sB);
+            sigs[0] = Signature(vA, rA, sA);
+            sigs[1] = Signature(vB, rB, sB);
         } else {
-            sigs[0] = IFirewallGatedBridge.Signature(vB, rB, sB);
-            sigs[1] = IFirewallGatedBridge.Signature(vA, rA, sA);
+            sigs[0] = Signature(vB, rB, sB);
+            sigs[1] = Signature(vA, rA, sA);
         }
 
         bytes memory attestation = abi.encode(
-            IFirewallGatedBridge.MultiAttestation({
+            MultiAttestation({
                 messageHash: messageHash,
                 sourceStateRoot: sourceStateRoot,
                 validAfter: validAfter,
@@ -77,7 +77,7 @@ contract FirewallIntegrationTest is Test {
     }
 
     function test_EndToEnd_ExploitBlocked_WhenReorgOccurs() public {
-        bytes memory message = abi.encode("transfer(100 ETH)");
+        bytes memory message = abi.encode(makeAddr("alice"), 100 ether);
         bytes memory emptyAttestation = "";
 
         vm.expectRevert(IFirewallGatedBridge.AttestationMissing.selector);

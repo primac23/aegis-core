@@ -2,56 +2,111 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {IFirewallGatedBridge} from "../src/IFirewallGatedBridge.sol";
+import {IFirewallGatedBridge, Signature, MultiAttestation} from "../src/IFirewallGatedBridge.sol";
 
-contract FirewallBridgeTest is Test {
+contract FirewallBridgeSecurityMatrixTest is Test {
     IFirewallGatedBridge public bridge;
 
     uint256 internal keyA = 0x1111;
     uint256 internal keyB = 0x2222;
     uint256 internal keyC = 0x3333;
+    uint256 internal keyAttacker = 0x9999;
 
     address internal guardianA;
     address internal guardianB;
     address internal guardianC;
+    address internal attacker;
 
     uint256 internal activeSetId = 1;
+    bytes32 internal stateRoot = keccak256("canonical_state_root");
+    bytes internal sampleMessage;
+    bytes32 internal sampleHash;
 
     function setUp() public {
+        vm.warp(1_000_000); // Evită underflow pe block.timestamp
+
         guardianA = vm.addr(keyA);
         guardianB = vm.addr(keyB);
         guardianC = vm.addr(keyC);
+        attacker = vm.addr(keyAttacker);
 
         address[] memory guardians = new address[](3);
         guardians[0] = guardianA;
         guardians[1] = guardianB;
         guardians[2] = guardianC;
 
-        // Prag 2 din 3, GuardianSetId = 1
         bridge = new IFirewallGatedBridge(guardians, 2, activeSetId);
+        sampleMessage = abi.encode(makeAddr("alice"), 100 ether);
+        sampleHash = keccak256(sampleMessage);
     }
 
-    function test_RevertWhen_StaleGuardianSet() public {
-        bytes memory message = abi.encode("transfer(100 ETH)");
-        bytes32 messageHash = keccak256(message);
-        bytes32 stateRoot = keccak256("state_root_19500000");
+    function _sign(uint256 key, bytes32 digest) internal pure returns (Signature memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        return Signature(v, r, s);
+    }
 
-        bytes32 digest = bridge.hashTypedAttestation(messageHash, stateRoot, block.timestamp, block.timestamp + 60, 19500000, 0);
-        (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(keyA, digest);
-        (uint8 vB, bytes32 rB, bytes32 sB) = vm.sign(keyB, digest);
+    function test_SecurityMatrix_01_SingleGuardian_Blocked() public {
+        bytes32 digest = bridge.hashTypedAttestation(sampleHash, stateRoot, block.timestamp, block.timestamp + 60, 19500000, activeSetId);
+        Signature[] memory sigs = new Signature[](1);
+        sigs[0] = _sign(keyA, digest);
 
-        IFirewallGatedBridge.Signature[] memory sigs = new IFirewallGatedBridge.Signature[](2);
+        bytes memory attestation = abi.encode(
+            MultiAttestation({
+                messageHash: sampleHash,
+                sourceStateRoot: stateRoot,
+                validAfter: block.timestamp,
+                validUntil: block.timestamp + 60,
+                sourceBlock: 19500000,
+                guardianSetId: activeSetId,
+                signatures: sigs
+            })
+        );
+
+        vm.expectRevert(IFirewallGatedBridge.QuorumNotReached.selector);
+        bridge.release(sampleMessage, attestation);
+    }
+
+    function test_SecurityMatrix_02_QuorumTwoOfThree_Allowed() public {
+        bytes32 digest = bridge.hashTypedAttestation(sampleHash, stateRoot, block.timestamp, block.timestamp + 60, 19500000, activeSetId);
+        Signature[] memory sigs = new Signature[](2);
         if (guardianA < guardianB) {
-            sigs[0] = IFirewallGatedBridge.Signature(vA, rA, sA);
-            sigs[1] = IFirewallGatedBridge.Signature(vB, rB, sB);
+            sigs[0] = _sign(keyA, digest);
+            sigs[1] = _sign(keyB, digest);
         } else {
-            sigs[0] = IFirewallGatedBridge.Signature(vB, rB, sB);
-            sigs[1] = IFirewallGatedBridge.Signature(vA, rA, sA);
+            sigs[0] = _sign(keyB, digest);
+            sigs[1] = _sign(keyA, digest);
         }
 
         bytes memory attestation = abi.encode(
-            IFirewallGatedBridge.MultiAttestation({
-                messageHash: messageHash,
+            MultiAttestation({
+                messageHash: sampleHash,
+                sourceStateRoot: stateRoot,
+                validAfter: block.timestamp,
+                validUntil: block.timestamp + 60,
+                sourceBlock: 19500000,
+                guardianSetId: activeSetId,
+                signatures: sigs
+            })
+        );
+
+        bridge.release(sampleMessage, attestation);
+        assertTrue(bridge.released(sampleHash));
+    }
+
+    function test_SecurityMatrix_03_StaleGuardianSet_Blocked() public {
+        bytes32 digest = bridge.hashTypedAttestation(sampleHash, stateRoot, block.timestamp, block.timestamp + 60, 19500000, 0);
+        Signature[] memory sigs = new Signature[](2);
+        if (guardianA < guardianB) {
+            sigs[0] = _sign(keyA, digest);
+            sigs[1] = _sign(keyB, digest);
+        } else {
+            sigs[0] = _sign(keyB, digest);
+            sigs[1] = _sign(keyA, digest);
+        }
+
+        bytes memory attestation = abi.encode(
+            MultiAttestation({
+                messageHash: sampleHash,
                 sourceStateRoot: stateRoot,
                 validAfter: block.timestamp,
                 validUntil: block.timestamp + 60,
@@ -62,28 +117,57 @@ contract FirewallBridgeTest is Test {
         );
 
         vm.expectRevert(IFirewallGatedBridge.InvalidGuardianSet.selector);
-        bridge.release(message, attestation);
+        bridge.release(sampleMessage, attestation);
     }
 
-    function test_RevertWhen_EquivocationSplitQuorum() public {
-        bytes memory message = abi.encode("transfer(100 ETH)");
-        bytes32 messageHash = keccak256(message);
-        
-        bytes32 rootCanonical = keccak256("canonical_root");
-        bytes32 rootFork = keccak256("fork_root");
-
-        // Gardianul A semnează pe o stare de fork
-        bytes32 digestFork = bridge.hashTypedAttestation(messageHash, rootFork, block.timestamp, block.timestamp + 60, 19500000, activeSetId);
-        (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(keyA, digestFork);
-
-        // Doar semnătura lui A trimisă pentru starea canonicală (fără cvorum)
-        IFirewallGatedBridge.Signature[] memory sigs = new IFirewallGatedBridge.Signature[](1);
-        sigs[0] = IFirewallGatedBridge.Signature(vA, rA, sA);
+    function test_SecurityMatrix_04_ExpiredAttestation_Blocked() public {
+        bytes32 digest = bridge.hashTypedAttestation(sampleHash, stateRoot, block.timestamp - 100, block.timestamp - 10, 19500000, activeSetId);
+        Signature[] memory sigs = new Signature[](2);
+        if (guardianA < guardianB) {
+            sigs[0] = _sign(keyA, digest);
+            sigs[1] = _sign(keyB, digest);
+        } else {
+            sigs[0] = _sign(keyB, digest);
+            sigs[1] = _sign(keyA, digest);
+        }
 
         bytes memory attestation = abi.encode(
-            IFirewallGatedBridge.MultiAttestation({
-                messageHash: messageHash,
-                sourceStateRoot: rootCanonical,
+            MultiAttestation({
+                messageHash: sampleHash,
+                sourceStateRoot: stateRoot,
+                validAfter: block.timestamp - 100,
+                validUntil: block.timestamp - 10,
+                sourceBlock: 19500000,
+                guardianSetId: activeSetId,
+                signatures: sigs
+            })
+        );
+
+        vm.expectRevert(IFirewallGatedBridge.AttestationExpired.selector);
+        bridge.release(sampleMessage, attestation);
+    }
+
+    function test_SecurityMatrix_05_EmergencyExit_RequiresAttestation() public {
+        bytes memory emptyAttestation = "";
+        vm.expectRevert(IFirewallGatedBridge.AttestationMissing.selector);
+        bridge.emergencyRelease(sampleMessage, emptyAttestation);
+    }
+
+    function test_SecurityMatrix_06_EmergencyExit_AllowedWithAttestation() public {
+        bytes32 digest = bridge.hashTypedAttestation(sampleHash, stateRoot, block.timestamp, block.timestamp + 60, 19500000, activeSetId);
+        Signature[] memory sigs = new Signature[](2);
+        if (guardianA < guardianB) {
+            sigs[0] = _sign(keyA, digest);
+            sigs[1] = _sign(keyB, digest);
+        } else {
+            sigs[0] = _sign(keyB, digest);
+            sigs[1] = _sign(keyA, digest);
+        }
+
+        bytes memory attestation = abi.encode(
+            MultiAttestation({
+                messageHash: sampleHash,
+                sourceStateRoot: stateRoot,
                 validAfter: block.timestamp,
                 validUntil: block.timestamp + 60,
                 sourceBlock: 19500000,
@@ -92,8 +176,7 @@ contract FirewallBridgeTest is Test {
             })
         );
 
-        // Revert garantat: 1 semnătură trimisă când sunt necesare 2
-        vm.expectRevert(IFirewallGatedBridge.QuorumNotReached.selector);
-        bridge.release(message, attestation);
+        bridge.emergencyRelease(sampleMessage, attestation);
+        assertTrue(bridge.released(sampleHash));
     }
 }

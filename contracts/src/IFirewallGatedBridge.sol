@@ -4,6 +4,22 @@ pragma solidity ^0.8.24;
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+struct Signature {
+    uint8 v;
+    bytes32 r;
+    bytes32 s;
+}
+
+struct MultiAttestation {
+    bytes32 messageHash;
+    bytes32 sourceStateRoot;
+    uint256 validAfter;
+    uint256 validUntil;
+    uint256 sourceBlock;
+    uint256 guardianSetId;
+    Signature[] signatures;
+}
+
 contract IFirewallGatedBridge {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
@@ -19,7 +35,6 @@ contract IFirewallGatedBridge {
     error InvalidMessage();
     error InvalidGuardianSet();
 
-    // Structura extinsă: leagă starea, blocul, epoca setului de gardieni
     bytes32 public constant ATTESTATION_TYPEHASH =
         keccak256(
             "FirewallAttestation(bytes32 messageHash,bytes32 sourceStateRoot,uint256 validAfter,uint256 validUntil,uint256 sourceBlock,uint256 guardianSetId)"
@@ -33,21 +48,8 @@ contract IFirewallGatedBridge {
     mapping(address => bool) public isGuardian;
     mapping(bytes32 => bool) public released;
 
-    struct Signature {
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-    }
-
-    struct MultiAttestation {
-        bytes32 messageHash;
-        bytes32 sourceStateRoot;
-        uint256 validAfter;
-        uint256 validUntil;
-        uint256 sourceBlock;
-        uint256 guardianSetId;
-        Signature[] signatures;
-    }
+    event AssetReleased(bytes32 indexed messageHash, address recipient, uint256 amount);
+    event EmergencyAssetReleased(bytes32 indexed messageHash, address recipient, uint256 amount);
 
     constructor(address[] memory _guardians, uint256 _threshold, uint256 _guardianSetId) {
         require(_threshold > 0 && _threshold <= _guardians.length, "Invalid threshold");
@@ -78,13 +80,10 @@ contract IFirewallGatedBridge {
         );
     }
 
-    function release(
-        bytes calldata message,
-        bytes calldata attestation
-    ) external returns (bytes32 messageHash) {
+    modifier checkFirewall(bytes calldata message, bytes calldata attestation) {
         if (attestation.length == 0) revert AttestationMissing();
 
-        messageHash = keccak256(message);
+        bytes32 messageHash = keccak256(message);
         MultiAttestation memory a = abi.decode(attestation, (MultiAttestation));
 
         if (a.messageHash != messageHash) revert InvalidMessage();
@@ -93,10 +92,7 @@ contract IFirewallGatedBridge {
         if (block.timestamp > a.validUntil) revert AttestationExpired();
         if (a.validUntil > block.timestamp + MAX_ATTESTATION_AGE) revert AttestationInvalid();
         if (a.sourceBlock == 0 || a.sourceStateRoot == bytes32(0)) revert AttestationInvalid();
-        
-        // Verificare guardian set epoch
         if (a.guardianSetId != currentGuardianSetId) revert InvalidGuardianSet();
-
         if (a.signatures.length < threshold) revert QuorumNotReached();
 
         bytes32 structHash = keccak256(
@@ -131,6 +127,25 @@ contract IFirewallGatedBridge {
         if (validSignatures < threshold) revert QuorumNotReached();
 
         released[messageHash] = true;
+        _;
+    }
+
+    function release(
+        bytes calldata message,
+        bytes calldata attestation
+    ) external checkFirewall(message, attestation) returns (bytes32 messageHash) {
+        messageHash = keccak256(message);
+        (address recipient, uint256 amount) = abi.decode(message, (address, uint256));
+        emit AssetReleased(messageHash, recipient, amount);
+    }
+
+    function emergencyRelease(
+        bytes calldata message,
+        bytes calldata attestation
+    ) external checkFirewall(message, attestation) returns (bytes32 messageHash) {
+        messageHash = keccak256(message);
+        (address recipient, uint256 amount) = abi.decode(message, (address, uint256));
+        emit EmergencyAssetReleased(messageHash, recipient, amount);
     }
 
     function hashTypedAttestation(
