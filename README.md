@@ -6,7 +6,7 @@
 
 ---
 
-## Key Security Properties (Formally Verified in Suite)
+## Key Security Properties (Specified Key Security Properties (Formally Verified in Suite) Validated via Foundry Suite)
 * **Threshold Quorum (M-of-N):** 2/3 independent guardian signatures required.
 * **Cryptographic State Binding:** Bound to sourceStateRoot, not just block height.
 * **Epoch Protection:** Bound to immutable guardianSetId.
