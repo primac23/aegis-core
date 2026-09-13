@@ -14,13 +14,13 @@ use types::{
 };
 use invalidation::invalidate_derivation;
 
-const BRIDGE_ADDRESS_HEX: &str = "5FbDB2315678afecb367f032d93F642f64180aa3";
 const ATTESTATION_TYPEHASH_STR: &str =
-    "FirewallAttestation(bytes32 messageHash,uint256 validAfter,uint256 validUntil,uint256 sourceBlock)";
+    "FirewallAttestation(bytes32 messageHash,bytes32 sourceStateRoot,uint256 validAfter,uint256 validUntil,uint256 sourceBlock)";
 
 fn compute_digest(
     domain_separator: H256,
     message_hash: H256,
+    source_state_root: H256,
     valid_after: U256,
     valid_until: U256,
     source_block: U256,
@@ -30,6 +30,7 @@ fn compute_digest(
     let encoded_struct = encode(&[
         Token::FixedBytes(typehash.to_vec()),
         Token::FixedBytes(message_hash.as_bytes().to_vec()),
+        Token::FixedBytes(source_state_root.as_bytes().to_vec()),
         Token::Uint(valid_after),
         Token::Uint(valid_until),
         Token::Uint(source_block),
@@ -47,34 +48,20 @@ fn compute_digest(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("====================================================");
-    println!("   AEGIS FIREWALL: LIVE CHAIN EXECUTION ENGINE      ");
+    println!("   AEGIS FIREWALL: THRESHOLD QUORUM ENGINE (2/3)    ");
     println!("====================================================");
 
-    let provider = Provider::<Http>::try_from("http://127.0.0.1:8545")?;
-    let provider = Arc::new(provider);
-    let chain_id = provider.get_chainid().await?;
-    let current_block = provider.get_block_number().await?;
-    println!("[RPC] Conectat la local Anvil (Chain ID: {}, Block: {})", chain_id, current_block);
+    // Initializare noduri gardian A, B si C
+    let wallet_a: LocalWallet = LocalWallet::from_bytes(&hex::decode("0000000000000000000000000000000000000000000000000000000000001111")?)?;
+    let wallet_b: LocalWallet = LocalWallet::from_bytes(&hex::decode("0000000000000000000000000000000000000000000000000000000000002222")?)?;
+    let wallet_c: LocalWallet = LocalWallet::from_bytes(&hex::decode("0000000000000000000000000000000000000000000000000000000000003333")?)?;
 
-    let raw_key = hex::decode("00000000000000000000000000000000000000000000000000000000000a11ce")?;
-    let wallet: LocalWallet = LocalWallet::from_bytes(&raw_key)?;
-    println!("[AUTH] Firewall Signer: {:?}", wallet.address());
+    println!("[AUTH] Guardian A: {:?}", wallet_a.address());
+    println!("[AUTH] Guardian B: {:?}", wallet_b.address());
+    println!("[AUTH] Guardian C: {:?}", wallet_c.address());
+    println!("[QUORUM] Prag necesar: 2 din 3 semnaturi independente");
 
-    let bridge_addr: Address = BRIDGE_ADDRESS_HEX.parse()?;
-    println!("[TARGET] Bridge Contract: {:?}", bridge_addr);
-
-    let eip712_typehash = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)".as_bytes());
-    let name_hash = keccak256("AEGIS Firewall".as_bytes());
-    let version_hash = keccak256("1".as_bytes());
-    let domain_separator = H256::from(keccak256(&encode(&[
-        Token::FixedBytes(eip712_typehash.to_vec()),
-        Token::FixedBytes(name_hash.to_vec()),
-        Token::FixedBytes(version_hash.to_vec()),
-        Token::Uint(chain_id),
-        Token::Address(bridge_addr),
-    ])));
-    println!("[EIP-712] Verified Domain Separator: 0x{:x}", domain_separator);
-
+    // Graful cauzal
     let mut graph = CausalGraph::new();
     let src_state = graph.add_node(Node {
         id: NodeId(0),
@@ -109,72 +96,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         kind: EdgeKind::Produces,
     });
 
-    println!("\n>>> ETAPA 1: Procesare tranzactie legitima (100 ETH)...");
+    println!("\n--- SCENARIUL 1: Tranzactie legitima cu cvorum atins ---");
     let payload = b"transfer(100 ETH to 0xAlice)";
     let message_hash = H256::from(keccak256(payload));
-
-    let block = provider.get_block(current_block).await?.unwrap();
-    let now = block.timestamp;
-    let valid_after = now;
-    let valid_until = now + U256::from(60);
+    let source_state_root = H256::from(keccak256(b"source_state_root_19500000"));
+    let valid_after = U256::from(1000);
+    let valid_until = U256::from(1060);
     let source_block = U256::from(19_500_000);
+    let domain_separator = H256::random();
 
-    let digest = compute_digest(domain_separator, message_hash, valid_after, valid_until, source_block);
-    let sig = wallet.sign_hash(digest)?;
+    let digest = compute_digest(domain_separator, message_hash, source_state_root, valid_after, valid_until, source_block);
 
-    println!("[ENGINE] Decizie Invariant: ALLOW");
-    println!("[ENGINE] Semnatura EIP-712 emisa cu succes.");
+    // Gardienii A si B valideaza si semneaza independent
+    let sig_a = wallet_a.sign_hash(digest)?;
+    let sig_b = wallet_b.sign_hash(digest)?;
+    println!("[QUORUM] Guardian A a semnat -> OK");
+    println!("[QUORUM] Guardian B a semnat -> OK");
+    println!("[DECISION] Prag (2/2) atins -> MultiAttestation gata de emitere");
 
-    let mut r_bytes = [0u8; 32];
-    let mut s_bytes = [0u8; 32];
-    sig.r.to_big_endian(&mut r_bytes);
-    sig.s.to_big_endian(&mut s_bytes);
-
-    let attestation_bytes = encode(&[
-        Token::Tuple(vec![
-            Token::FixedBytes(message_hash.as_bytes().to_vec()),
-            Token::Uint(valid_after),
-            Token::Uint(valid_until),
-            Token::Uint(source_block),
-            Token::Uint(U256::from(sig.v)),
-            Token::FixedBytes(r_bytes.to_vec()),
-            Token::FixedBytes(s_bytes.to_vec()),
-        ])
-    ]);
-
-    let release_selector = &keccak256("release(bytes,bytes)".as_bytes())[0..4];
-    let mut calldata = Vec::new();
-    calldata.extend_from_slice(release_selector);
-    calldata.extend_from_slice(&encode(&[
-        Token::Bytes(payload.to_vec()),
-        Token::Bytes(attestation_bytes),
-    ]));
-
-    println!("\n[CHAIN ACTION] Trimitere tranzactie catre contractul deployed...");
-    let user_wallet: LocalWallet = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80".parse()?;
-    let tx = ethers_core::types::TransactionRequest::new()
-        .to(bridge_addr)
-        .from(user_wallet.address())
-        .data(Bytes::from(calldata))
-        .gas(200_000u64);
-
-    let pending_tx = provider.send_transaction(tx, None).await?;
-    let receipt = pending_tx.await?.unwrap();
-    println!("[SUCCESS] Tranzactie confirmata in blocul #{:?}! Gas consumat: {:?}", receipt.block_number.unwrap(), receipt.gas_used.unwrap());
-
-    println!("\n>>> ETAPA 2: Simulare Reorg pe sursa si tentativa atacator...");
-    println!("[EVENT] Reorg pe nodul sursa! Rulam invalidarea...");
+    println!("\n--- SCENARIUL 2: Detectare reorg pe Chain A ---");
     let evidence = invalidate_derivation(src_state, &mut graph);
+    println!("[ENGINE] Nodul sursa 19,500,000 invalidat.");
     println!("[ENGINE] Decizie Causal: {:?}", evidence.decision);
 
     if evidence.decision == Decision::Freeze {
-        println!("[FAIL-CLOSED]: Semnatura refuzata. Atacatorul nu poate genera atestarea.");
-        println!("[CHAIN ACTION]: Tentativa atacatorului pe contract este respinsa garantat.");
+        println!("[FAIL-CLOSED]: Semnaturile au fost REFUSATE de nodurile clusterului.");
+        println!("[STATUS]: Zero semnaturi emise. Niciun gardian nu aproba starea orfana.");
     }
-
-    println!("\n====================================================");
-    println!("   DEMONSTRATIE TEHNICA COMPLETA CU SUCCES!         ");
-    println!("====================================================");
 
     Ok(())
 }

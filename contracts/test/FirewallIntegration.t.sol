@@ -7,56 +7,74 @@ import {IFirewallGatedBridge} from "../src/IFirewallGatedBridge.sol";
 contract FirewallIntegrationTest is Test {
     IFirewallGatedBridge public bridge;
 
-    // Cheia privată a firewall-ului (0xA11CE din Rust)
-    uint256 internal firewallPrivateKey = 0xA11CE;
-    address internal firewallSigner;
+    uint256 internal keyA = 0x1111;
+    uint256 internal keyB = 0x2222;
+    uint256 internal keyC = 0x3333;
+
+    address internal guardianA;
+    address internal guardianB;
+    address internal guardianC;
 
     function setUp() public {
-        firewallSigner = vm.addr(firewallPrivateKey);
-        bridge = new IFirewallGatedBridge(firewallSigner);
+        guardianA = vm.addr(keyA);
+        guardianB = vm.addr(keyB);
+        guardianC = vm.addr(keyC);
+
+        address[] memory guardians = new address[](3);
+        guardians[0] = guardianA;
+        guardians[1] = guardianB;
+        guardians[2] = guardianC;
+
+        // Prag 2 din 3
+        bridge = new IFirewallGatedBridge(guardians, 2);
     }
 
-    function test_EndToEnd_LegitimateRelease() public {
+    function test_EndToEnd_LegitimateRelease_MultiSigner() public {
         bytes memory message = abi.encode("transfer(100 ETH)");
         bytes32 messageHash = keccak256(message);
+        bytes32 sourceStateRoot = keccak256("state_root_19500000");
 
         uint256 validAfter = block.timestamp;
         uint256 validUntil = block.timestamp + 60;
         uint256 sourceBlock = 19500000;
 
-        // Calcul digest identic cu compute_digest() din Rust
         bytes32 digest = bridge.hashTypedAttestation(
             messageHash,
+            sourceStateRoot,
             validAfter,
             validUntil,
             sourceBlock
         );
 
-        // Semnăm cu cheia firewall-ului
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(firewallPrivateKey, digest);
+        (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(keyA, digest);
+        (uint8 vB, bytes32 rB, bytes32 sB) = vm.sign(keyB, digest);
+
+        IFirewallGatedBridge.Signature[] memory sigs = new IFirewallGatedBridge.Signature[](2);
+        if (guardianA < guardianB) {
+            sigs[0] = IFirewallGatedBridge.Signature(vA, rA, sA);
+            sigs[1] = IFirewallGatedBridge.Signature(vB, rB, sB);
+        } else {
+            sigs[0] = IFirewallGatedBridge.Signature(vB, rB, sB);
+            sigs[1] = IFirewallGatedBridge.Signature(vA, rA, sA);
+        }
 
         bytes memory attestation = abi.encode(
-            IFirewallGatedBridge.Attestation({
+            IFirewallGatedBridge.MultiAttestation({
                 messageHash: messageHash,
+                sourceStateRoot: sourceStateRoot,
                 validAfter: validAfter,
                 validUntil: validUntil,
                 sourceBlock: sourceBlock,
-                v: v,
-                r: r,
-                s: s
+                signatures: sigs
             })
         );
 
-        // Execuția reușește
         bridge.release(message, attestation);
         assertTrue(bridge.released(messageHash));
     }
 
     function test_EndToEnd_ExploitBlocked_WhenReorgOccurs() public {
         bytes memory message = abi.encode("transfer(100 ETH)");
-        
-        // În caz de reorg, motorul Rust dă FREEZE și refuză să emită semnătura.
-        // Atacatorul încearcă să trimită apelul fără semnătură validă.
         bytes memory emptyAttestation = "";
 
         vm.expectRevert(IFirewallGatedBridge.AttestationMissing.selector);
