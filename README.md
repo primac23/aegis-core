@@ -1,26 +1,35 @@
-# AEGIS: Causal Invariant Cross-Chain Firewall
+# AEGIS: Cross-Chain Release Authorization Firewall
 
-AEGIS is a low-latency, fail-closed security infrastructure for cross-chain bridges and liquidity transfer protocols.
+**Problem:** Cross-chain bridges observe invalid or reorged economic states before reactive pause mechanisms (pause()) can execute through mempools, exposing protocols to MEV frontrunning and catastrophic asset drainage.
 
-## The Structural Flaw in Modern Bridges
-Most cross-chain bridges rely on optimistic assumptions or mempool-based emergency pause functions. During source-chain reorganizations or deep invalidations, attackers leverage MEV / priority fees to execute unbacked releases before emergency transactions can be included.
+**Solution:** Fail-Closed authorization primitive. No valid cryptographic attestation implies no asset release.
 
-## The AEGIS Architecture
-AEGIS replaces reactive pausing with an **EIP-712 Fail-Closed Attestation Model**:
-1. **Zero-Trust Release:** Target chain contracts (`IFirewallGatedBridge.sol`) require a cryptographically authenticated attestation bound to a specific source block and causal execution state.
-2. **Sub-Millisecond Graph Traversal:** The off-chain engine maintains an in-memory incremental causal directed acyclic graph (DAG) in Rust, mapping state dependencies: `ChainState -> Message -> Release`.
-3. **Instant Contamination Isolation:** Upon detecting a source-chain reorg or invariant deviation, invalidation propagates downstream in under 1ms, returning `Decision::Freeze` and refusing attestation signatures.
+---
 
-## Verification & Benchmarks
-- **EVM Verification Gas:** ~29,368 gas on receipt
-- **Graph Traversal Latency:** < 500 microseconds
-- **Failure Mode:** Deterministic EVM revert on missing or expired attestation
+## Key Security Properties (Formally Verified in Suite)
+* **Threshold Quorum (M-of-N):** 2/3 independent guardian signatures required.
+* **Cryptographic State Binding:** Bound to sourceStateRoot, not just block height.
+* **Epoch Protection:** Bound to immutable guardianSetId.
+* **Universal Exit Gate:** Applied to both standard and emergency release paths.
+* **Causal Invalidation:** Instant Freeze upon source-chain reorg.
 
-## Reproduction Steps
+---
+
+## Quickstart & Reproducible Demo
+
+### 1. Run Complete Foundry Security Matrix (10 Tests)
 ```bash
-# Contracts (Foundry)
-cd contracts && forge test
-
-# Live RPC Engine (Rust)
-cd engine && cargo run --release
+cd contracts && forge test -v
 ```
+
+### 2. Run End-to-End Dual-Chain Adversarial Demo
+```bash
+./scripts/demo_adversarial_flow.sh
+```
+
+---
+
+## Documentation
+* [Pilot Specification & Rollout Plan](PILOT_PROPOSAL.md)
+* [Threat Model & Security Invariants](THREAT_MODEL.md)
+* [Architecture & Integration Adapter](ARCHITECTURE.md)
