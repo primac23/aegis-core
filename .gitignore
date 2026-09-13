@@ -4,4 +4,5 @@ cache/
  broadcast/
 *.log
 .env
+broadcast/
 contracts/broadcast/
