@@ -15,6 +15,8 @@ contract FirewallIntegrationTest is Test {
     address internal guardianB;
     address internal guardianC;
 
+    uint256 internal activeSetId = 1;
+
     function setUp() public {
         guardianA = vm.addr(keyA);
         guardianB = vm.addr(keyB);
@@ -25,8 +27,7 @@ contract FirewallIntegrationTest is Test {
         guardians[1] = guardianB;
         guardians[2] = guardianC;
 
-        // Prag 2 din 3
-        bridge = new IFirewallGatedBridge(guardians, 2);
+        bridge = new IFirewallGatedBridge(guardians, 2, activeSetId);
     }
 
     function test_EndToEnd_LegitimateRelease_MultiSigner() public {
@@ -43,7 +44,8 @@ contract FirewallIntegrationTest is Test {
             sourceStateRoot,
             validAfter,
             validUntil,
-            sourceBlock
+            sourceBlock,
+            activeSetId
         );
 
         (uint8 vA, bytes32 rA, bytes32 sA) = vm.sign(keyA, digest);
@@ -65,6 +67,7 @@ contract FirewallIntegrationTest is Test {
                 validAfter: validAfter,
                 validUntil: validUntil,
                 sourceBlock: sourceBlock,
+                guardianSetId: activeSetId,
                 signatures: sigs
             })
         );

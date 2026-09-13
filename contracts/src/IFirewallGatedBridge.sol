@@ -17,20 +17,20 @@ contract IFirewallGatedBridge {
     error DuplicateSigner();
     error InvalidSigner();
     error InvalidMessage();
+    error InvalidGuardianSet();
 
-    // Structură extinsă cu sourceStateRoot pentru angajament de stare real
+    // Structura extinsă: leagă starea, blocul, epoca setului de gardieni
     bytes32 public constant ATTESTATION_TYPEHASH =
         keccak256(
-            "FirewallAttestation(bytes32 messageHash,bytes32 sourceStateRoot,uint256 validAfter,uint256 validUntil,uint256 sourceBlock)"
+            "FirewallAttestation(bytes32 messageHash,bytes32 sourceStateRoot,uint256 validAfter,uint256 validUntil,uint256 sourceBlock,uint256 guardianSetId)"
         );
 
     bytes32 public immutable DOMAIN_SEPARATOR;
     uint256 public constant MAX_ATTESTATION_AGE = 2 minutes;
     
-    // Prag M of N (ex: 2 din 3)
     uint256 public immutable threshold;
+    uint256 public immutable currentGuardianSetId;
     mapping(address => bool) public isGuardian;
-
     mapping(bytes32 => bool) public released;
 
     struct Signature {
@@ -45,12 +45,14 @@ contract IFirewallGatedBridge {
         uint256 validAfter;
         uint256 validUntil;
         uint256 sourceBlock;
+        uint256 guardianSetId;
         Signature[] signatures;
     }
 
-    constructor(address[] memory _guardians, uint256 _threshold) {
+    constructor(address[] memory _guardians, uint256 _threshold, uint256 _guardianSetId) {
         require(_threshold > 0 && _threshold <= _guardians.length, "Invalid threshold");
         threshold = _threshold;
+        currentGuardianSetId = _guardianSetId;
 
         for (uint256 i = 0; i < _guardians.length; i++) {
             address g = _guardians[i];
@@ -91,8 +93,10 @@ contract IFirewallGatedBridge {
         if (block.timestamp > a.validUntil) revert AttestationExpired();
         if (a.validUntil > block.timestamp + MAX_ATTESTATION_AGE) revert AttestationInvalid();
         if (a.sourceBlock == 0 || a.sourceStateRoot == bytes32(0)) revert AttestationInvalid();
+        
+        // Verificare guardian set epoch
+        if (a.guardianSetId != currentGuardianSetId) revert InvalidGuardianSet();
 
-        // Verificăm pragul M of N
         if (a.signatures.length < threshold) revert QuorumNotReached();
 
         bytes32 structHash = keccak256(
@@ -102,7 +106,8 @@ contract IFirewallGatedBridge {
                 a.sourceStateRoot,
                 a.validAfter,
                 a.validUntil,
-                a.sourceBlock
+                a.sourceBlock,
+                a.guardianSetId
             )
         );
 
@@ -115,8 +120,6 @@ contract IFirewallGatedBridge {
 
         for (uint256 i = 0; i < a.signatures.length; i++) {
             address signer = digest.recover(a.signatures[i].v, a.signatures[i].r, a.signatures[i].s);
-            
-            // Forțăm ordonare strictă pentru a preveni duplicatele fără mapping suplimentar
             if (signer <= lastSigner) revert DuplicateSigner();
             lastSigner = signer;
 
@@ -128,11 +131,6 @@ contract IFirewallGatedBridge {
         if (validSignatures < threshold) revert QuorumNotReached();
 
         released[messageHash] = true;
-        _executeRelease(message);
-    }
-
-    function _executeRelease(bytes calldata message) internal {
-        // Deblocare fonduri
     }
 
     function hashTypedAttestation(
@@ -140,7 +138,8 @@ contract IFirewallGatedBridge {
         bytes32 sourceStateRoot,
         uint256 validAfter,
         uint256 validUntil,
-        uint256 sourceBlock
+        uint256 sourceBlock,
+        uint256 guardianSetId
     ) external view returns (bytes32) {
         bytes32 structHash = keccak256(
             abi.encode(
@@ -149,7 +148,8 @@ contract IFirewallGatedBridge {
                 sourceStateRoot,
                 validAfter,
                 validUntil,
-                sourceBlock
+                sourceBlock,
+                guardianSetId
             )
         );
         return keccak256(
