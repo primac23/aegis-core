@@ -6,3 +6,6 @@ cache/
 .env
 broadcast/
 contracts/broadcast/
+
+**/broadcast/
+broadcast/**
