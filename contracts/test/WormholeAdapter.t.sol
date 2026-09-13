@@ -35,7 +35,6 @@ contract WormholeAdapterTest is Test {
 
         adapter = new WormholeAegisAdapter(guardians, 2, activeSetId);
 
-        // Simulăm un payload VAA: ChainId 2 (Ethereum), emitter 0x01, seq 42, recipient Alice, 50 ETH
         sampleVaa = abi.encode(
             uint16(2),
             bytes32(uint256(1)),
@@ -51,15 +50,12 @@ contract WormholeAdapterTest is Test {
         return Signature(v, r, s);
     }
 
-    // Scenariul 1: VAA autentic, dar starea sursă a suferit reorg -> lipsă atestare AEGIS -> REVERT
     function test_RevertWhen_VaaAuthentic_ButAegisAuthorizationMissing() public {
         bytes memory emptyAttestation = "";
-
         vm.expectRevert(IFirewallGatedBridge.AttestationMissing.selector);
         adapter.completeTransferWithAegis(sampleVaa, emptyAttestation);
     }
 
-    // Scenariul 2: VAA autentic + Stare canonică validată în DAG -> ALLOW
     function test_SuccessWhen_VaaAndAegisQuorumValid() public {
         bytes32 digest = adapter.hashTypedAttestation(
             vaaHash,
@@ -93,5 +89,49 @@ contract WormholeAdapterTest is Test {
 
         adapter.completeTransferWithAegis(sampleVaa, attestation);
         assertTrue(adapter.released(vaaHash));
+    }
+
+    function test_RevertWhen_VaaMismatchedWithAegisMessageHash() public {
+        bytes memory foreignVaa = abi.encode(
+            uint16(2),
+            bytes32(uint256(1)),
+            uint64(999),
+            makeAddr("bob"),
+            10 ether
+        );
+        bytes32 foreignHash = keccak256(foreignVaa);
+
+        bytes32 digest = adapter.hashTypedAttestation(
+            foreignHash,
+            stateRoot,
+            block.timestamp,
+            block.timestamp + 60,
+            19500000,
+            activeSetId
+        );
+
+        Signature[] memory sigs = new Signature[](2);
+        if (guardianA < guardianB) {
+            sigs[0] = _sign(keyA, digest);
+            sigs[1] = _sign(keyB, digest);
+        } else {
+            sigs[0] = _sign(keyB, digest);
+            sigs[1] = _sign(keyA, digest);
+        }
+
+        bytes memory attestation = abi.encode(
+            MultiAttestation({
+                messageHash: foreignHash,
+                sourceStateRoot: stateRoot,
+                validAfter: block.timestamp,
+                validUntil: block.timestamp + 60,
+                sourceBlock: 19500000,
+                guardianSetId: activeSetId,
+                signatures: sigs
+            })
+        );
+
+        vm.expectRevert(IFirewallGatedBridge.InvalidMessage.selector);
+        adapter.completeTransferWithAegis(sampleVaa, attestation);
     }
 }
