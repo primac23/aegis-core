@@ -56,7 +56,7 @@ A Rust guardian daemon enforces the finality policy in production code:
 ## Scope & Known Limitations (v0.2.0)
 
 - No on-chain light client or state proof; source validity is attested by the guardian quorum.
-- `WormholeAegisAdapter` verifies VAAs via `IWormhole.parseAndVerifyVM`, accepts only the registered emitter per source chain, rejects non-finalized consistency levels (200 instant, 201 safe) and binds the AEGIS attestation to the VAA hash. It is tested against a signature-verifying mock of Wormhole Core; a fork test against the deployed Core contract is pending.
+- `WormholeAegisAdapter` verifies VAAs via `IWormhole.parseAndVerifyVM`, accepts only the registered emitter per source chain, rejects non-finalized consistency levels (200 instant, 201 safe) and binds the AEGIS attestation to the VAA hash. It is tested against a signature-verifying mock and, on an Ethereum mainnet fork, against the deployed Wormhole Core with a real Token Bridge VAA (`AEGIS_FORK_TESTS=true forge test --match-path test/WormholeFork.t.sol`).
 - The guardian set is fixed per deployment; rotation requires redeployment.
 - The finality policy is implemented in the Rust guardian daemon (`engine/`). Guardian keys are loaded from environment variables; HSM/MPC key custody is a deployment requirement and is not provided.
 - No invariant fuzzing or formal verification yet. Verification cost scales with the number of signatures (O(M)).

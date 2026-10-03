@@ -56,6 +56,6 @@ cd contracts && forge test -v
 
 ## 6. Implementation Status (v0.1.1)
 
-- `WormholeAegisAdapter.completeTransferWithAegis` calls Wormhole Core `parseAndVerifyVM`, enforces a registered emitter per source chain, rejects non-finalized VAAs (consistency 200/201) and requires an AEGIS quorum attestation bound to the VAA hash. Tested against a signature-verifying mock; a fork test against the deployed Core is next.
+- `WormholeAegisAdapter.completeTransferWithAegis` calls Wormhole Core `parseAndVerifyVM`, enforces a registered emitter per source chain, rejects non-finalized VAAs (consistency 200/201) and requires an AEGIS quorum attestation bound to the VAA hash. Tested against a signature-verifying mock and on an Ethereum mainnet fork against the deployed Core with a real Token Bridge VAA: authentic VAA accepted, single-byte tampering rejected by Core, AEGIS attestation still required.
 - Reorg safety is enforced by the guardian finality policy, not on-chain. See `THREAT_MODEL.md` (Addendum v0.1.1) and `scripts/live_reorg_demo.sh`.
 - Test suite: 32 Foundry tests, all passing (`cd contracts && forge test -vv`).
