@@ -11,7 +11,7 @@
 3. Guardians sign an EIP-712 attestation over `(messageHash, sourceStateRoot, validAfter, validUntil, sourceBlock, guardianSetId)`.
 4. The destination verifies quorum, signer ordering, guardian set, validity window and message binding, marks the message released, then executes.
 
-## Security Properties — 23 Foundry tests, all passing
+## Security Properties — 32 Foundry tests, all passing
 
 | Property | Enforcement | Tests |
 |---|---|---|
@@ -25,6 +25,7 @@
 | Universal exit gate | Emergency path uses the same verifier | `SecurityMatrix_05`, `SecurityMatrix_06` |
 | Fail-closed release | `AttestationMissing` | `EndToEnd_ReleaseBlocked_WhenAttestationMissing`, `VaaAuthentic_ButAegisAuthorizationMissing` |
 | Cross-domain message binding | `InvalidMessage` | `VaaMismatchedWithAegisMessageHash` |
+| Wormhole VAA verification | `InvalidVaa`, `UnknownEmitter`, `VaaNotFinalized` | `VaaSignatureInvalid`, `UnknownEmitterChain`, `SpoofedEmitterOnRegisteredChain`, `VaaNotFinalized_Instant`, `VaaNotFinalized_Safe`, `AttestationBoundToRawBytesInsteadOfVaaHash`, `VaaReplayed` |
 | **Known limitation** (documented) | — | `KnownLimitation_OrphanedRootAttestationIsAccepted` |
 
 ## Reorg Safety Model
@@ -44,7 +45,7 @@ The destination contract has no view of canonical source state, so it cannot det
 ## Scope & Known Limitations (v0.1.1)
 
 - No on-chain light client or state proof; source validity is attested by the guardian quorum.
-- `WormholeAegisAdapter` is an integration-surface prototype: it does not yet call Wormhole Core to verify the VAA. VAA authenticity is assumed to be verified upstream.
+- `WormholeAegisAdapter` verifies VAAs via `IWormhole.parseAndVerifyVM`, accepts only the registered emitter per source chain, rejects non-finalized consistency levels (200 instant, 201 safe) and binds the AEGIS attestation to the VAA hash. It is tested against a signature-verifying mock of Wormhole Core; a fork test against the deployed Core contract is pending.
 - The guardian set is fixed per deployment; rotation requires redeployment.
 - The finality policy is implemented in the demo harness; the production guardian daemon (`engine/`) is in progress.
 - No invariant fuzzing or formal verification yet. Verification cost scales with the number of signatures (O(M)).
@@ -54,7 +55,7 @@ The destination contract has no view of canonical source state, so it cannot det
 Requires [Foundry](https://getfoundry.sh) (`forge`, `anvil`, `cast`).
 
 ```bash
-cd contracts && forge test -vv          # 23 tests
+cd contracts && forge test -vv          # 32 tests
 ./scripts/live_reorg_demo.sh            # live dual-chain reorg demo (A–E)
 ```
 

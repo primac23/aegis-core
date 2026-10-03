@@ -42,7 +42,7 @@ contract IFirewallGatedBridge {
 
     bytes32 public immutable DOMAIN_SEPARATOR;
     uint256 public constant MAX_ATTESTATION_AGE = 2 minutes;
-    
+
     uint256 public immutable threshold;
     uint256 public immutable currentGuardianSetId;
     mapping(address => bool) public isGuardian;
@@ -62,28 +62,22 @@ contract IFirewallGatedBridge {
             isGuardian[g] = true;
         }
 
-        uint256 chainId;
-        assembly {
-            chainId := chainid()
-        }
-
         DOMAIN_SEPARATOR = keccak256(
             abi.encode(
-                keccak256(
-                    "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-                ),
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                 keccak256(bytes("AEGIS Firewall")),
                 keccak256(bytes("1")),
-                chainId,
+                block.chainid,
                 address(this)
             )
         );
     }
 
-    modifier checkFirewall(bytes calldata message, bytes calldata attestation) {
+    /// @dev Core fail-closed check. Verifies an M-of-N attestation bound to `messageHash`
+    ///      and marks the message as released. Reverts on any failure.
+    function _verifyAttestation(bytes32 messageHash, bytes calldata attestation) internal {
         if (attestation.length == 0) revert AttestationMissing();
 
-        bytes32 messageHash = keccak256(message);
         MultiAttestation memory a = abi.decode(attestation, (MultiAttestation));
 
         if (a.messageHash != messageHash) revert InvalidMessage();
@@ -106,43 +100,41 @@ contract IFirewallGatedBridge {
                 a.guardianSetId
             )
         );
-
-        bytes32 digest = keccak256(
-            abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash)
-        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
 
         address lastSigner = address(0);
         uint256 validSignatures = 0;
-
         for (uint256 i = 0; i < a.signatures.length; i++) {
             address signer = digest.recover(a.signatures[i].v, a.signatures[i].r, a.signatures[i].s);
             if (signer <= lastSigner) revert DuplicateSigner();
             lastSigner = signer;
-
-            if (isGuardian[signer]) {
-                validSignatures++;
-            }
+            if (isGuardian[signer]) validSignatures++;
         }
-
         if (validSignatures < threshold) revert QuorumNotReached();
 
         released[messageHash] = true;
+    }
+
+    modifier checkFirewall(bytes calldata message, bytes calldata attestation) {
+        _verifyAttestation(keccak256(message), attestation);
         _;
     }
 
-    function release(
-        bytes calldata message,
-        bytes calldata attestation
-    ) external checkFirewall(message, attestation) returns (bytes32 messageHash) {
+    function release(bytes calldata message, bytes calldata attestation)
+        external
+        checkFirewall(message, attestation)
+        returns (bytes32 messageHash)
+    {
         messageHash = keccak256(message);
         (address recipient, uint256 amount) = abi.decode(message, (address, uint256));
         emit AssetReleased(messageHash, recipient, amount);
     }
 
-    function emergencyRelease(
-        bytes calldata message,
-        bytes calldata attestation
-    ) external checkFirewall(message, attestation) returns (bytes32 messageHash) {
+    function emergencyRelease(bytes calldata message, bytes calldata attestation)
+        external
+        checkFirewall(message, attestation)
+        returns (bytes32 messageHash)
+    {
         messageHash = keccak256(message);
         (address recipient, uint256 amount) = abi.decode(message, (address, uint256));
         emit EmergencyAssetReleased(messageHash, recipient, amount);
@@ -158,17 +150,9 @@ contract IFirewallGatedBridge {
     ) external view returns (bytes32) {
         bytes32 structHash = keccak256(
             abi.encode(
-                ATTESTATION_TYPEHASH,
-                messageHash,
-                sourceStateRoot,
-                validAfter,
-                validUntil,
-                sourceBlock,
-                guardianSetId
+                ATTESTATION_TYPEHASH, messageHash, sourceStateRoot, validAfter, validUntil, sourceBlock, guardianSetId
             )
         );
-        return keccak256(
-            abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash)
-        );
+        return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
     }
 }

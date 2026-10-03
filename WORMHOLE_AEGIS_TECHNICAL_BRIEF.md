@@ -56,6 +56,6 @@ cd contracts && forge test -v
 
 ## 6. Implementation Status (v0.1.1)
 
-- `WormholeAegisAdapter.completeTransferWithAegis` enforces the AEGIS quorum, message binding and replay protection. It does **not yet** call Wormhole Core `parseAndVerifyVM`; VAA verification is the next integration step.
+- `WormholeAegisAdapter.completeTransferWithAegis` calls Wormhole Core `parseAndVerifyVM`, enforces a registered emitter per source chain, rejects non-finalized VAAs (consistency 200/201) and requires an AEGIS quorum attestation bound to the VAA hash. Tested against a signature-verifying mock; a fork test against the deployed Core is next.
 - Reorg safety is enforced by the guardian finality policy, not on-chain. See `THREAT_MODEL.md` (Addendum v0.1.1) and `scripts/live_reorg_demo.sh`.
-- Test suite: 23 Foundry tests, all passing (`cd contracts && forge test -vv`).
+- Test suite: 32 Foundry tests, all passing (`cd contracts && forge test -vv`).
