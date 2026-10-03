@@ -62,9 +62,9 @@ AEGIS packages as a Wormhole **NTT transceiver** (`AegisNttTransceiver`), implem
 
 The April 2026 KelpDAO exploit ($292M) did not require an on-chain bug: compromised RPC nodes fed a forged view of the source chain to a single verifier, which then signed a message for a transfer that never happened. AEGIS guardians defend against this directly: each guardian queries several independent RPC endpoints for the canonical block hash at the deposit's height and signs only when a quorum of them agree. If any endpoint diverges (poisoned or on a different fork), the guardian refuses and logs `RPC-POISON`.
 
-`scripts/live_rpc_poison_demo.sh` demonstrates this with three source RPC nodes, one forced onto a divergent fork: with all three agreeing the guardian signs; with one poisoned, it refuses.
+`scripts/live_rpc_poison_demo.sh` demonstrates this with one honest source chain read through three RPC URLs, one of them behind a proxy that rewrites the block hash: with all three views agreeing the guardian signs; with one poisoned, it refuses.
 
-## Scope & Known Limitations (v0.2.0)
+## Scope & Known Limitations
 
 - No on-chain light client or state proof; source validity is attested by the guardian quorum.
 - `WormholeAegisAdapter` verifies VAAs via `IWormhole.parseAndVerifyVM`, accepts only the registered emitter per source chain, rejects non-finalized consistency levels (200 instant, 201 safe) and binds the AEGIS attestation to the VAA hash. It is tested against a signature-verifying mock and, on an Ethereum mainnet fork, against the deployed Wormhole Core with a real Token Bridge VAA (`AEGIS_FORK_TESTS=true forge test --match-path test/WormholeFork.t.sol`).
