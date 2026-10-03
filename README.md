@@ -53,6 +53,12 @@ A Rust guardian daemon enforces the finality policy in production code:
 
 `scripts/live_daemon_demo.sh` runs two independent guardian processes against live Anvil chains: a legitimate transfer is released, a source reorg is refused by both guardians (`AttestationMissing`), an identical second transfer is released, and with only one guardian online no quorum forms (fail-closed liveness).
 
+## RPC-Poisoning Resistance (`engine/`)
+
+The April 2026 KelpDAO exploit ($292M) did not require an on-chain bug: compromised RPC nodes fed a forged view of the source chain to a single verifier, which then signed a message for a transfer that never happened. AEGIS guardians defend against this directly: each guardian queries several independent RPC endpoints for the canonical block hash at the deposit's height and signs only when a quorum of them agree. If any endpoint diverges (poisoned or on a different fork), the guardian refuses and logs `RPC-POISON`.
+
+`scripts/live_rpc_poison_demo.sh` demonstrates this with three source RPC nodes, one forced onto a divergent fork: with all three agreeing the guardian signs; with one poisoned, it refuses.
+
 ## Scope & Known Limitations (v0.2.0)
 
 - No on-chain light client or state proof; source validity is attested by the guardian quorum.

@@ -16,6 +16,7 @@ use ethers_signers::{LocalWallet, Signer};
 use crate::digest::{digest, h256_hex, AttestationFields};
 use crate::invalidation::invalidate_derivation;
 use crate::policy::{classify, validity_window, SourceStatus};
+use crate::rpc::{consensus, RpcConsensus};
 use crate::types::{CausalGraph, DecisionEvidence, Edge, EdgeKind, Node, NodeId, NodeKind};
 
 pub type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -23,7 +24,8 @@ pub type Res<T> = Result<T, Box<dyn std::error::Error>>;
 const DEPOSIT_EVENT: &str = "Deposit(bytes32,address,address,uint256,uint256,uint256,bytes)";
 
 struct Config {
-    src_rpc: String,
+    src_rpcs: Vec<String>,
+    rpc_quorum: usize,
     dst_rpc: String,
     src_contract: Address,
     bridge: Address,
@@ -46,7 +48,11 @@ fn var_or(name: &str, default: &str) -> String {
 impl Config {
     fn from_env() -> Res<Self> {
         Ok(Self {
-            src_rpc: var("SRC_RPC")?,
+            src_rpcs: {
+                let raw = env::var("SRC_RPCS").or_else(|_| var("SRC_RPC"))?;
+                raw.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+            },
+            rpc_quorum: 0, // completat după parsare, mai jos
             dst_rpc: var("DST_RPC")?,
             src_contract: var("SRC_CONTRACT")?.parse()?,
             bridge: var("BRIDGE")?.parse()?,
@@ -57,6 +63,12 @@ impl Config {
             poll: Duration::from_millis(var_or("POLL_MS", "500").parse()?),
             from_block: var_or("FROM_BLOCK", "0").parse()?,
         })
+    }
+
+    fn finalize(mut self) -> Self {
+        let q = env::var("RPC_QUORUM").ok().and_then(|v| v.parse().ok());
+        self.rpc_quorum = q.unwrap_or(self.src_rpcs.len()).max(1);
+        self
     }
 }
 
@@ -77,14 +89,19 @@ struct State {
 struct Ctx {
     cfg: Config,
     src: Provider<Http>,
+    extra: Vec<Provider<Http>>,
     dst: Provider<Http>,
     wallet: LocalWallet,
     domain: H256,
 }
 
 pub async fn run() -> Res<()> {
-    let cfg = Config::from_env()?;
-    let src = Provider::<Http>::try_from(cfg.src_rpc.as_str())?;
+    let cfg = Config::from_env()?.finalize();
+    let src = Provider::<Http>::try_from(cfg.src_rpcs[0].as_str())?;
+    let extra_rpcs: Vec<Provider<Http>> = cfg.src_rpcs[1..]
+        .iter()
+        .filter_map(|u| Provider::<Http>::try_from(u.as_str()).ok())
+        .collect();
     let dst = Provider::<Http>::try_from(cfg.dst_rpc.as_str())?;
     let wallet: LocalWallet = cfg.key.parse()?;
 
@@ -95,12 +112,12 @@ pub async fn run() -> Res<()> {
     let domain = H256::from_slice(&raw[..32]);
     fs::create_dir_all(&cfg.dir)?;
     println!(
-        "[GUARDIAN {:?}] online | K={} | guardianSetId={} | domain={}",
-        wallet.address(), cfg.k, cfg.set_id, h256_hex(domain)
+        "[GUARDIAN {:?}] online | K={} | RPCs={} quorum={} | guardianSetId={} | domain={}",
+        wallet.address(), cfg.k, cfg.src_rpcs.len(), cfg.rpc_quorum, cfg.set_id, h256_hex(domain)
     );
 
     let mut state = State { scanned: cfg.from_block, seen: HashSet::new(), pending: HashMap::new() };
-    let ctx = Ctx { cfg, src, dst, wallet, domain };
+    let ctx = Ctx { cfg, src, extra: extra_rpcs, dst, wallet, domain };
     loop {
         if let Err(e) = tick(&ctx, &mut state).await {
             eprintln!("[WARN] {e}");
@@ -149,7 +166,14 @@ async fn tick(ctx: &Ctx, st: &mut State) -> Res<()> {
     for (tx, p) in st.pending.iter_mut() {
         let receipt_hash = ctx.src.get_transaction_receipt(*tx).await?.and_then(|r| r.block_hash);
         let canonical = ctx.src.get_block(p.block).await?.and_then(|b| b.hash);
-        let status = classify(receipt_hash, canonical, head, p.block, cfg.k);
+        let rpc = rpc_consensus_at(ctx, p.block).await?;
+        let rpc_agreed = matches!(rpc, RpcConsensus::Agreed(_));
+        if !rpc_agreed && matches!(rpc, RpcConsensus::Poisoned { .. } | RpcConsensus::Insufficient { .. }) {
+            if p.last_status != Some(SourceStatus::Orphaned) {
+                println!("[RPC-POISON] msg {} | independent RPCs disagree: {:?} | refusing to sign", short(p.message_hash), rpc);
+            }
+        }
+        let status = classify(receipt_hash, canonical, head, p.block, cfg.k, rpc_agreed);
         if p.last_status != Some(status) {
             println!("[STATUS] msg {} -> {:?}", short(p.message_hash), status);
             p.last_status = Some(status);
@@ -198,6 +222,15 @@ async fn tick(ctx: &Ctx, st: &mut State) -> Res<()> {
         }
     }
     Ok(())
+}
+
+async fn rpc_consensus_at(ctx: &Ctx, block: u64) -> Res<RpcConsensus> {
+    let mut hashes: Vec<Option<H256>> = Vec::with_capacity(1 + ctx.extra.len());
+    hashes.push(ctx.src.get_block(block).await?.and_then(|b| b.hash));
+    for p in &ctx.extra {
+        hashes.push(p.get_block(block).await.ok().flatten().and_then(|b| b.hash));
+    }
+    Ok(consensus(&hashes, ctx.cfg.rpc_quorum))
 }
 
 async fn eth_call(p: &Provider<Http>, to: Address, data: Vec<u8>) -> Res<Bytes> {

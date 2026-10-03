@@ -3,6 +3,7 @@ mod digest;
 mod guardian;
 mod invalidation;
 mod policy;
+mod rpc;
 mod types;
 
 #[tokio::main]

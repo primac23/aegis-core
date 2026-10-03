@@ -20,8 +20,11 @@ pub fn classify(
     head: u64,
     block: u64,
     k: u64,
+    rpc_agreed: bool,
 ) -> SourceStatus {
     match (receipt_block_hash, canonical_hash_at_height) {
+        // Canonical on the primary RPC, but independent RPCs disagree: treat as orphaned/poisoned.
+        (Some(r), Some(c)) if r == c && !rpc_agreed => SourceStatus::Orphaned,
         (Some(r), Some(c)) if r == c => {
             let confirmations = head.saturating_sub(block);
             if confirmations >= k {
@@ -47,27 +50,33 @@ mod tests {
 
     #[test]
     fn final_when_canonical_and_k_confirmations() {
-        assert_eq!(classify(Some(H), Some(H), 110, 100, 3), SourceStatus::Final);
+        assert_eq!(classify(Some(H), Some(H), 110, 100, 3, true), SourceStatus::Final);
     }
 
     #[test]
     fn final_exactly_at_k() {
-        assert_eq!(classify(Some(H), Some(H), 103, 100, 3), SourceStatus::Final);
+        assert_eq!(classify(Some(H), Some(H), 103, 100, 3, true), SourceStatus::Final);
     }
 
     #[test]
     fn pending_below_k() {
-        assert_eq!(classify(Some(H), Some(H), 102, 100, 3), SourceStatus::Pending { confirmations: 2 });
+        assert_eq!(classify(Some(H), Some(H), 102, 100, 3, true), SourceStatus::Pending { confirmations: 2 });
     }
 
     #[test]
     fn orphaned_when_receipt_missing() {
-        assert_eq!(classify(None, Some(H), 110, 100, 3), SourceStatus::Orphaned);
+        assert_eq!(classify(None, Some(H), 110, 100, 3, true), SourceStatus::Orphaned);
+    }
+
+    #[test]
+    fn poisoned_rpc_consensus_blocks_even_if_canonical_on_primary() {
+        // Receipt matches primary canonical hash and has K confirmations, but RPCs disagree.
+        assert_eq!(classify(Some(H), Some(H), 110, 100, 3, false), SourceStatus::Orphaned);
     }
 
     #[test]
     fn orphaned_when_block_hash_differs() {
-        assert_eq!(classify(Some(H), Some(OTHER), 110, 100, 3), SourceStatus::Orphaned);
+        assert_eq!(classify(Some(H), Some(OTHER), 110, 100, 3, true), SourceStatus::Orphaned);
     }
 
     #[test]

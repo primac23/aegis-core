@@ -46,3 +46,7 @@ $$\text{CanonicalStateInvalidated} \implies \neg \text{FirewallAuthorization}(\t
 - **Wormhole:** a release requires a valid VAA (`parseAndVerifyVM`), the registered emitter for its source chain and a finalized consistency level. Non-finalized VAAs (200 instant, 201 safe) are rejected on-chain, closing the low-consistency reorg window for Wormhole-originated messages.
 - **Guardian daemon:** implements the finality policy of Addendum v0.1.1 in Rust. Key custody is local (environment variable); HSM/MPC is a deployment requirement.
 - **Liveness:** fewer than threshold guardians online means no attestation and therefore no release. This is fail-closed by design and is demonstrated in `scripts/live_daemon_demo.sh` (scenario E).
+
+## Addendum v0.3.0 — RPC-Poisoning Resistance
+
+The dominant real-world bridge-verifier failure (KelpDAO, April 2026) was RPC poisoning: a verifier reading from compromised RPC nodes signed a message for a non-existent transfer. AEGIS guardians require agreement across multiple independent RPC endpoints (configurable quorum, default all) on the canonical block hash before signing. A single poisoned or forked endpoint breaks consensus and the guardian refuses to sign (`RpcConsensus::Poisoned`). This does not defend against collusion of a quorum of RPC providers, nor against all providers sharing the same upstream.
