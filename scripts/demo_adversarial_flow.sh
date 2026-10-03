@@ -17,7 +17,7 @@ PID_B=$!
 trap "kill -9 $PID_A $PID_B 2>/dev/null || true" EXIT
 sleep 2
 
-cd ~/aegis_firewall/contracts
+cd "$(dirname "$(readlink -f "$0")")/../contracts"
 
 echo "[1/4] Deploy SourceDepositBox pe Chain A (port 8545)..."
 OUT_A=$(forge script script/DeployCrossChain.s.sol:DeployChainA --rpc-url http://127.0.0.1:8545 --broadcast --non-interactive)

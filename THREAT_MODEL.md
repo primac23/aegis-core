@@ -30,3 +30,13 @@ $$\text{CanonicalStateInvalidated} \implies \neg \text{FirewallAuthorization}(\t
 * **Compromiterea simultană a >= M gardieni**: Dacă cvorumul este capturat integral (2/3), granița de securitate este încălcată.
 * **Compromiterea consensului L1/L2 de destinație**: Atacuri de tip 51% pe lanțul de destinație.
 * **Căi de ieșire nelegate la Gate**: Vulnerabilități în smart contracte terțe ale bridge-ului care nu moștenesc `AegisFirewallGate`.
+
+---
+
+## Addendum v0.1.1 — Reorg Safety & Guardian Finality Policy
+
+**Trust boundary.** The destination contract verifies *who* signed and *what* they signed, not whether the attested source state is still canonical. An attestation over an orphaned `sourceStateRoot` is accepted on-chain (`test_KnownLimitation_OrphanedRootAttestationIsAccepted`).
+
+**Mitigation.** Guardians MUST sign only when (1) the deposit has at least K confirmations and (2) the deposit receipt's block hash equals the canonical block hash at that height. Demonstrated live in `scripts/live_reorg_demo.sh`: naive guardians (scenario C) pay out an orphaned deposit; finality-aware guardians (scenario D) refuse to sign and the release fails closed.
+
+**Residual risk.** A colluding or compromised quorum (≥ threshold keys) can authorize any release. K must be chosen per source chain according to its finality model.

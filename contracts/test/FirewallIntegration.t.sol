@@ -76,7 +76,7 @@ contract FirewallIntegrationTest is Test {
         assertTrue(bridge.released(messageHash));
     }
 
-    function test_EndToEnd_ExploitBlocked_WhenReorgOccurs() public {
+    function test_EndToEnd_ReleaseBlocked_WhenAttestationMissing() public {
         bytes memory message = abi.encode(makeAddr("alice"), 100 ether);
         bytes memory emptyAttestation = "";
 

@@ -2,7 +2,7 @@
 # AEGIS live dual-chain demo: legit, replay, reorg (naive vs finality-aware guardians), duplicate payload
 set -uo pipefail
 export PATH="$HOME/.foundry/bin:$PATH"
-cd ~/aegis_firewall/contracts || exit 1
+cd "$(dirname "$(readlink -f "$0")")/../contracts" || exit 1
 
 RA=http://127.0.0.1:8545; RB=http://127.0.0.1:8546
 DEPLOYER=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80

@@ -53,3 +53,9 @@ AEGIS does not replace Wormhole Guardians (13/19) or compete with the Global Acc
 cd contracts && forge test -v
 ./scripts/demo_adversarial_flow.sh
 ```
+
+## 6. Implementation Status (v0.1.1)
+
+- `WormholeAegisAdapter.completeTransferWithAegis` enforces the AEGIS quorum, message binding and replay protection. It does **not yet** call Wormhole Core `parseAndVerifyVM`; VAA verification is the next integration step.
+- Reorg safety is enforced by the guardian finality policy, not on-chain. See `THREAT_MODEL.md` (Addendum v0.1.1) and `scripts/live_reorg_demo.sh`.
+- Test suite: 23 Foundry tests, all passing (`cd contracts && forge test -vv`).
