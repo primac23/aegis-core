@@ -58,4 +58,8 @@ cd contracts && forge test -v
 
 - `WormholeAegisAdapter.completeTransferWithAegis` calls Wormhole Core `parseAndVerifyVM`, enforces a registered emitter per source chain, rejects non-finalized VAAs (consistency 200/201) and requires an AEGIS quorum attestation bound to the VAA hash. Tested against a signature-verifying mock and on an Ethereum mainnet fork against the deployed Core with a real Token Bridge VAA: authentic VAA accepted, single-byte tampering rejected by Core, AEGIS attestation still required.
 - Reorg safety is enforced by the guardian finality policy, not on-chain. See `THREAT_MODEL.md` (Addendum v0.1.1) and `scripts/live_reorg_demo.sh`.
-- Test suite: 32 Foundry tests, all passing (`cd contracts && forge test -vv`).
+- Test suite: 49 Foundry tests (44 run by default, 5 mainnet-fork opt-in)
+
+## 7. NTT Transceiver Integration (v0.4.0)
+
+AEGIS is available as an NTT transceiver (`src/ntt/AegisNttTransceiver.sol`) implementing `ITransceiver`. Registered under an `NttManager` with threshold 2/2 next to the Wormhole transceiver, it calls `attestationReceived` only after the AEGIS guardian quorum verifies the delivered message; the manager executes only once both transceivers attest. Signatures match wormhole-foundation/native-token-transfers; tested against a mock manager replicating the attestation bitmap and threshold. Integration with the real NttManager contract is the next step.

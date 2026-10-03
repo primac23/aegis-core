@@ -11,7 +11,7 @@
 3. Guardians sign an EIP-712 attestation over `(messageHash, sourceStateRoot, validAfter, validUntil, sourceBlock, guardianSetId)`.
 4. The destination verifies quorum, signer ordering, guardian set, validity window and message binding, marks the message released, then executes.
 
-## Security Properties — 32 Foundry tests, all passing
+## Security Properties — 49 Foundry tests (44 run by default, 5 mainnet-fork opt-in), all passing
 
 | Property | Enforcement | Tests |
 |---|---|---|
@@ -26,6 +26,7 @@
 | Fail-closed release | `AttestationMissing` | `EndToEnd_ReleaseBlocked_WhenAttestationMissing`, `VaaAuthentic_ButAegisAuthorizationMissing` |
 | Cross-domain message binding | `InvalidMessage` | `VaaMismatchedWithAegisMessageHash` |
 | Wormhole VAA verification | `InvalidVaa`, `UnknownEmitter`, `VaaNotFinalized` | `VaaSignatureInvalid`, `UnknownEmitterChain`, `SpoofedEmitterOnRegisteredChain`, `VaaNotFinalized_Instant`, `VaaNotFinalized_Safe`, `AttestationBoundToRawBytesInsteadOfVaaHash`, `VaaReplayed` |
+| Safety & liveness under random call sequences | Invariant fuzzing (64 runs × 50 calls) | `invariant_NoReleaseWithoutValidQuorum`, `invariant_ValidQuorumAlwaysAccepted`, `invariant_NoMessageReleasedTwice`, `invariant_ReleasedFlagMatchesHistory` |
 | **Known limitation** (documented) | — | `KnownLimitation_OrphanedRootAttestationIsAccepted` |
 
 ## Reorg Safety Model
@@ -53,6 +54,10 @@ A Rust guardian daemon enforces the finality policy in production code:
 
 `scripts/live_daemon_demo.sh` runs two independent guardian processes against live Anvil chains: a legitimate transfer is released, a source reorg is refused by both guardians (`AttestationMissing`), an identical second transfer is released, and with only one guardian online no quorum forms (fail-closed liveness).
 
+## Wormhole NTT Integration (`src/ntt/`)
+
+AEGIS packages as a Wormhole **NTT transceiver** (`AegisNttTransceiver`), implementing `ITransceiver` so it registers under an `NttManager` alongside the Wormhole transceiver. On delivery it attests a message to the manager **only after the AEGIS M-of-N guardian check passes**; the manager executes only when its threshold (e.g. 2/2 with Wormhole) is met. This makes AEGIS an additional verifier inside an existing NTT deployment rather than a parallel system. Verified against a mock `NttManager` that mirrors the real attestation bitmap and threshold logic (11 tests); a test against the real NttManager is pending.
+
 ## RPC-Poisoning Resistance (`engine/`)
 
 The April 2026 KelpDAO exploit ($292M) did not require an on-chain bug: compromised RPC nodes fed a forged view of the source chain to a single verifier, which then signed a message for a transfer that never happened. AEGIS guardians defend against this directly: each guardian queries several independent RPC endpoints for the canonical block hash at the deposit's height and signs only when a quorum of them agree. If any endpoint diverges (poisoned or on a different fork), the guardian refuses and logs `RPC-POISON`.
@@ -65,14 +70,14 @@ The April 2026 KelpDAO exploit ($292M) did not require an on-chain bug: compromi
 - `WormholeAegisAdapter` verifies VAAs via `IWormhole.parseAndVerifyVM`, accepts only the registered emitter per source chain, rejects non-finalized consistency levels (200 instant, 201 safe) and binds the AEGIS attestation to the VAA hash. It is tested against a signature-verifying mock and, on an Ethereum mainnet fork, against the deployed Wormhole Core with a real Token Bridge VAA (`AEGIS_FORK_TESTS=true forge test --match-path test/WormholeFork.t.sol`).
 - The guardian set is fixed per deployment; rotation requires redeployment.
 - The finality policy is implemented in the Rust guardian daemon (`engine/`). Guardian keys are loaded from environment variables; HSM/MPC key custody is a deployment requirement and is not provided.
-- No invariant fuzzing or formal verification yet. Verification cost scales with the number of signatures (O(M)).
+- Invariant fuzzing covers the core firewall; no formal verification yet. Verification cost scales with the number of signatures (O(M)).
 
 ## Quickstart
 
 Requires [Foundry](https://getfoundry.sh) (`forge`, `anvil`, `cast`).
 
 ```bash
-cd contracts && forge test -vv          # 32 tests
+cd contracts && forge test -vv          # 44 tests (+5 opt-in fork tests)
 ./scripts/live_reorg_demo.sh            # live dual-chain reorg demo (A–E)
 ./scripts/live_daemon_demo.sh           # same chains, real Rust guardian daemons (2-of-3)
 cd engine && cargo test                 # guardian policy unit tests
