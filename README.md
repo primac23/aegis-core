@@ -42,12 +42,23 @@ The destination contract has no view of canonical source state, so it cannot det
 | D. Reorg, finality-aware guardians | Guardians refuse to sign → `AttestationMissing` |
 | E. Second identical legitimate transfer | Released (unique nonce) |
 
-## Scope & Known Limitations (v0.1.1)
+## Guardian Daemon (`engine/`)
+
+A Rust guardian daemon enforces the finality policy in production code:
+
+- Reads `DOMAIN_SEPARATOR` from the destination contract, so its EIP-712 digests match on-chain verification.
+- Watches `Deposit` events and classifies each deposit as `Pending`, `Final` (≥ K confirmations and receipt block hash equal to the canonical hash at that height) or `Orphaned`.
+- Signs only `Final` deposits. On `Orphaned` it refuses and logs causal-invalidation evidence.
+- Uses 60-second aligned validity windows so independent guardians sign identical digests; `engine aggregate` combines ≥ threshold signatures into an on-chain attestation.
+
+`scripts/live_daemon_demo.sh` runs two independent guardian processes against live Anvil chains: a legitimate transfer is released, a source reorg is refused by both guardians (`AttestationMissing`), an identical second transfer is released, and with only one guardian online no quorum forms (fail-closed liveness).
+
+## Scope & Known Limitations (v0.2.0)
 
 - No on-chain light client or state proof; source validity is attested by the guardian quorum.
 - `WormholeAegisAdapter` verifies VAAs via `IWormhole.parseAndVerifyVM`, accepts only the registered emitter per source chain, rejects non-finalized consistency levels (200 instant, 201 safe) and binds the AEGIS attestation to the VAA hash. It is tested against a signature-verifying mock of Wormhole Core; a fork test against the deployed Core contract is pending.
 - The guardian set is fixed per deployment; rotation requires redeployment.
-- The finality policy is implemented in the demo harness; the production guardian daemon (`engine/`) is in progress.
+- The finality policy is implemented in the Rust guardian daemon (`engine/`). Guardian keys are loaded from environment variables; HSM/MPC key custody is a deployment requirement and is not provided.
 - No invariant fuzzing or formal verification yet. Verification cost scales with the number of signatures (O(M)).
 
 ## Quickstart
@@ -57,6 +68,8 @@ Requires [Foundry](https://getfoundry.sh) (`forge`, `anvil`, `cast`).
 ```bash
 cd contracts && forge test -vv          # 32 tests
 ./scripts/live_reorg_demo.sh            # live dual-chain reorg demo (A–E)
+./scripts/live_daemon_demo.sh           # same chains, real Rust guardian daemons (2-of-3)
+cd engine && cargo test                 # guardian policy unit tests
 ```
 
 ## Documentation

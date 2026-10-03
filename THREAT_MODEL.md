@@ -40,3 +40,9 @@ $$\text{CanonicalStateInvalidated} \implies \neg \text{FirewallAuthorization}(\t
 **Mitigation.** Guardians MUST sign only when (1) the deposit has at least K confirmations and (2) the deposit receipt's block hash equals the canonical block hash at that height. Demonstrated live in `scripts/live_reorg_demo.sh`: naive guardians (scenario C) pay out an orphaned deposit; finality-aware guardians (scenario D) refuse to sign and the release fails closed.
 
 **Residual risk.** A colluding or compromised quorum (≥ threshold keys) can authorize any release. K must be chosen per source chain according to its finality model.
+
+## Addendum v0.2.0 — Wormhole Layer & Guardian Daemon
+
+- **Wormhole:** a release requires a valid VAA (`parseAndVerifyVM`), the registered emitter for its source chain and a finalized consistency level. Non-finalized VAAs (200 instant, 201 safe) are rejected on-chain, closing the low-consistency reorg window for Wormhole-originated messages.
+- **Guardian daemon:** implements the finality policy of Addendum v0.1.1 in Rust. Key custody is local (environment variable); HSM/MPC is a deployment requirement.
+- **Liveness:** fewer than threshold guardians online means no attestation and therefore no release. This is fail-closed by design and is demonstrated in `scripts/live_daemon_demo.sh` (scenario E).

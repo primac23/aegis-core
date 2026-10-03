@@ -26,3 +26,13 @@ jobs:
       - name: Run Foundry Tests
         working-directory: contracts
         run: forge test -v
+
+  engine:
+    name: Guardian Daemon (Rust) Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run cargo test
+        working-directory: engine
+        run: cargo test
