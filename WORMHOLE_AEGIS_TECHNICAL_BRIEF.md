@@ -37,7 +37,7 @@ AEGIS does not replace Wormhole Guardians (13/19) or compete with the Global Acc
        RELEASE             REVERT
 ```
 
-## 3. Verified Security Invariants
+## 3. Security Invariants (covered by Foundry tests)
 * **Authorization Decoupling:** VAA.isValid does not imply Release.isAuthorized.
 * **State Binding:** Attestation is bound to sourceStateRoot, preventing blind execution.
 * **Epoch Binding:** Bound to guardianSetId, preventing cross-epoch replays.
@@ -51,7 +51,7 @@ AEGIS does not replace Wormhole Guardians (13/19) or compete with the Global Acc
 ## 5. Local Reproduction
 ```bash
 cd contracts && forge test -v
-./scripts/demo_adversarial_flow.sh
+./scripts/live_reorg_demo.sh
 ```
 
 ## 6. Implementation Status (v0.1.1)
